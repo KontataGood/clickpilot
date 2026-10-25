@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from .config import load_config, save_config
 from .clicker import Clicker
+from .activity_log import ActivityLogger
 
 
 class MainWindow(QMainWindow):
@@ -48,9 +49,17 @@ class MainWindow(QMainWindow):
         self.point_selected.connect(self.on_point_selected)
         self.toggle_requested.connect(self.toggle_clicking)
 
+        self.activity_logger = ActivityLogger()
+
         self.build_ui()
         self.load_settings_into_ui()
         self.update_status(self.clicker.is_running)
+
+        for entry in self.activity_logger.read_recent():
+            self.log_view.appendPlainText(entry)
+
+        self.log_event("Приложение запущено")
+        self.log_event("Настройки загружены")
 
         self.keyboard_listener = keyboard.Listener(
             on_press=self.on_global_key_press,
@@ -374,8 +383,11 @@ class MainWindow(QMainWindow):
         self.log_event(f"Клик №{self.click_count} · {timestamp}")
 
     def log_event(self, message: str) -> None:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_view.appendPlainText(f"[{timestamp}] {message}")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry = f"{timestamp} | {message}"
+
+        self.activity_logger.log(message)
+        self.log_view.appendPlainText(entry)
 
     @Slot(str)
     def show_error(self, message: str) -> None:
