@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
+    QFileDialog,
 )
 
 from .config import load_config, save_config
@@ -165,6 +166,19 @@ class MainWindow(QMainWindow):
         self.log_view.setPlaceholderText("События появятся здесь...")
         self.log_view.setMinimumHeight(130)
         layout.addWidget(self.log_view)
+
+        log_buttons = QHBoxLayout()
+
+        self.export_log_button = QPushButton("Экспорт журнала")
+        self.export_log_button.clicked.connect(self.export_log)
+
+        self.clear_log_button = QPushButton("Очистить журнал")
+        self.clear_log_button.clicked.connect(self.clear_log)
+
+        log_buttons.addWidget(self.export_log_button)
+        log_buttons.addWidget(self.clear_log_button)
+        layout.addLayout(log_buttons)
+
 
         hint = QLabel(
             "F5 — сохранить позицию курсора во время выбора точки.\n"
@@ -400,6 +414,51 @@ class MainWindow(QMainWindow):
         self.keyboard_listener.stop()
         self.log_event("Приложение закрывается")
         event.accept()
+
+
+    @Slot()
+    def export_log(self) -> None:
+        destination, _ = QFileDialog.getSaveFileName(
+            self,
+            "Экспорт журнала",
+            "clickpilot-activity.txt",
+            "Текстовые файлы (*.txt)",
+        )
+
+        if not destination:
+            return
+
+        try:
+            self.activity_logger.export_log(destination)
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Журнал успешно экспортирован.",
+            )
+        except OSError as exc:
+            self.show_error(f"Не удалось экспортировать журнал: {exc}")
+
+    @Slot()
+    def clear_log(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Очистить журнал",
+            "Удалить сохранённую историю действий?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self.activity_logger.clear_log()
+            self.log_view.clear()
+            self.log_event("Журнал очищен")
+        except OSError as exc:
+            self.show_error(f"Не удалось очистить журнал: {exc}")
+
 
 
 def main() -> None:
