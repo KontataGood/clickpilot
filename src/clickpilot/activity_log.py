@@ -47,3 +47,30 @@ class ActivityLogger:
             return [line.rstrip("\n") for line in lines[-limit:]]
         except OSError:
             return []
+
+
+    def export_log(self, destination: str) -> None:
+        """Экспортирует текущий журнал в выбранный файл."""
+        from pathlib import Path
+        import shutil
+
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if LOG_FILE.exists():
+            shutil.copyfile(LOG_FILE, target)
+        else:
+            target.write_text("", encoding="utf-8")
+
+    def clear_log(self) -> None:
+        """Очищает текущий журнал."""
+        for handler in self.logger.handlers:
+            if isinstance(handler, RotatingFileHandler):
+                handler.acquire()
+                try:
+                    handler.close()
+                    if LOG_FILE.exists():
+                        LOG_FILE.unlink()
+                    handler.stream = handler._open()
+                finally:
+                    handler.release()
