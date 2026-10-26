@@ -7,7 +7,7 @@ a = Analysis(
     ["run_clickpilot.py"],
     pathex=["src"],
     binaries=[],
-    datas=[],
+    datas=[("assets/clickpilot.ico", "assets")],
     hiddenimports=[],
     hookspath=["hooks"],
     hooksconfig={},
@@ -55,6 +55,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon="assets/clickpilot.ico",
 )
 
 coll = COLLECT(
