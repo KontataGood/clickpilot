@@ -5,8 +5,10 @@ from datetime import datetime
 import pyautogui
 from pynput import keyboard
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal, Slot
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -26,6 +28,9 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
     QInputDialog,
     QScrollArea,
+    QButtonGroup,
+    QFrame,
+    QStackedWidget,
 )
 
 from .config import (
@@ -38,7 +43,14 @@ from .config import (
 from .clicker import Clicker
 from .activity_log import ActivityLogger
 from .hotkeys import hotkeys_conflict
+from .styles import APP_STYLE
 
+def resource_path(relative_path: str) -> str:
+    """Находит ресурс в исходном проекте или сборке PyInstaller."""
+    base_path = Path(
+        getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])
+    )
+    return str(base_path / relative_path)
 
 class MainWindow(QMainWindow):
     point_selected = Signal(int, int)
@@ -90,81 +102,114 @@ class MainWindow(QMainWindow):
 
     def build_ui(self) -> None:
         root = QWidget()
-        root.setMinimumWidth(620)
+        root_layout = QHBoxLayout(root)
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setSpacing(12)
 
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(10)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        # Боковая панель
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(190)
 
-        title = QLabel("ClickPilot")
-        title.setObjectName("title")
-        layout.addWidget(title)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 12, 8, 12)
+        sidebar_layout.setSpacing(6)
 
-        layout.addWidget(self.make_section_title("ПРОФИЛЬ НАСТРОЕК"))
+        brand = QLabel("ClickPilot")
+        brand.setObjectName("brand")
+        sidebar_layout.addWidget(brand)
 
-        profile_row = QHBoxLayout()
+        sidebar_layout.addSpacing(16)
 
-        self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(160)
-        self.profile_combo.currentTextChanged.connect(
-            self.on_profile_changed
+        self.page_stack = QStackedWidget()
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+
+        nav_items = [
+            ("Главная", "⌂"),
+            ("Профили", "▤"),
+            ("Журнал", "◷"),
+            ("Настройки", "⚙"),
+        ]
+
+        for index, (title, symbol) in enumerate(nav_items):
+            button = QPushButton(f"{symbol}   {title}")
+            button.setObjectName("navButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.nav_group.addButton(button, index)
+            sidebar_layout.addWidget(button)
+
+        sidebar_layout.addStretch()
+
+        version_label = QLabel("ClickPilot · v0.2.0")
+        version_label.setObjectName("hint")
+        sidebar_layout.addWidget(version_label)
+
+        root_layout.addWidget(sidebar)
+
+        # Страницы
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 8)
+        content_layout.addWidget(self.page_stack)
+
+        root_layout.addWidget(content, 1)
+
+        def create_page(title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(8, 8, 8, 8)
+            page_layout.setSpacing(14)
+
+            heading = QLabel(title)
+            heading.setObjectName("title")
+            page_layout.addWidget(heading)
+
+            description = QLabel(subtitle)
+            description.setObjectName("subtitle")
+            description.setWordWrap(True)
+            page_layout.addWidget(description)
+
+            self.page_stack.addWidget(page)
+            return page, page_layout
+
+        # --------------------------------------------------
+        # Главная
+        # --------------------------------------------------
+        home_page, home_layout = create_page(
+            "Главная",
+            "Управление автоматическими кликами мышью.",
         )
-        profile_row.addWidget(self.profile_combo, 1)
 
-        self.create_profile_button = QPushButton("Создать")
-        self.create_profile_button.clicked.connect(
-            self.create_profile
-        )
-        profile_row.addWidget(self.create_profile_button)
-
-        self.rename_profile_button = QPushButton("Переименовать")
-        self.rename_profile_button.clicked.connect(
-            self.rename_profile
-        )
-        profile_row.addWidget(self.rename_profile_button)
-
-        self.delete_profile_button = QPushButton("Удалить")
-        self.delete_profile_button.clicked.connect(
-            self.remove_profile
-        )
-        profile_row.addWidget(self.delete_profile_button)
-
-        layout.addLayout(profile_row)
-
-
-        subtitle = QLabel(
-            "Автоматические клики мышью с сохранением настроек"
-        )
-        subtitle.setObjectName("subtitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
-
-        layout.addWidget(self.make_section_title("ТОЧКА КЛИКА"))
+        home_layout.addWidget(self.make_section_title("ТОЧКА КЛИКА"))
 
         self.point_label = QLabel("Точка не выбрана")
         self.point_label.setObjectName("pointLabel")
         self.point_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        layout.addWidget(self.point_label)
+        home_layout.addWidget(self.point_label)
 
-        self.select_button = QPushButton("Выбрать точку  ·  F5")
+        self.select_button = QPushButton("Выбрать точку · F5")
+        self.select_button.setMinimumHeight(42)
         self.select_button.clicked.connect(self.begin_point_selection)
-        layout.addWidget(self.select_button)
+        home_layout.addWidget(self.select_button)
 
-        layout.addWidget(self.make_section_title("ПАРАМЕТРЫ"))
+        home_layout.addWidget(self.make_section_title("ПАРАМЕТРЫ"))
 
         form = QFormLayout()
         form.setSpacing(12)
-
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
 
         self.interval_input = QDoubleSpinBox()
         self.interval_input.setRange(1, 86_400_000)
         self.interval_input.setSingleStep(100)
         self.interval_input.setDecimals(3)
         self.interval_input.setValue(5.0)
+        self.interval_input.setMinimumWidth(120)
 
         self.interval_unit_input = QComboBox()
         self.interval_unit_input.addItem("Миллисекунды", "ms")
@@ -172,24 +217,11 @@ class MainWindow(QMainWindow):
         self.interval_unit_input.addItem("Минуты", "min")
 
         interval_row = QHBoxLayout()
-        interval_row.setSpacing(10)
-
-        self.interval_input.setMinimumWidth(140)
-        self.interval_input.setSizePolicy(
-            self.interval_input.sizePolicy().Policy.Expanding,
-            self.interval_input.sizePolicy().Policy.Fixed,
-        )
-
-        self.interval_unit_input.setMinimumWidth(150)
-
+        interval_row.setSpacing(8)
         interval_row.addWidget(self.interval_input, 2)
         interval_row.addWidget(self.interval_unit_input, 1)
 
-        form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
         form.addRow("Интервал между кликами", interval_row)
-
 
         self.click_type_input = QComboBox()
         self.click_type_input.addItem("Левый клик", "left")
@@ -197,32 +229,7 @@ class MainWindow(QMainWindow):
         self.click_type_input.addItem("Двойной клик", "double")
         form.addRow("Тип действия", self.click_type_input)
 
-        layout.addLayout(form)
-
-        layout.addWidget(self.make_section_title("ГОРЯЧИЕ КЛАВИШИ"))
-
-        point_hotkey_row = QHBoxLayout()
-        point_hotkey_row.addWidget(QLabel("Выбор точки"))
-        point_hotkey_row.addStretch()
-
-        self.point_hotkey_button = QPushButton()
-        self.point_hotkey_button.clicked.connect(
-            lambda: self.begin_hotkey_capture("point_hotkey")
-        )
-        point_hotkey_row.addWidget(self.point_hotkey_button)
-        layout.addLayout(point_hotkey_row)
-
-        toggle_hotkey_row = QHBoxLayout()
-        toggle_hotkey_row.addWidget(QLabel("Старт / стоп"))
-        toggle_hotkey_row.addStretch()
-
-        self.toggle_hotkey_button = QPushButton()
-        self.toggle_hotkey_button.clicked.connect(
-            lambda: self.begin_hotkey_capture("toggle_hotkey")
-        )
-        toggle_hotkey_row.addWidget(self.toggle_hotkey_button)
-        layout.addLayout(toggle_hotkey_row)
-
+        home_layout.addLayout(form)
 
         self.interval_input.valueChanged.connect(self.save_settings)
         self.interval_unit_input.currentIndexChanged.connect(
@@ -232,47 +239,95 @@ class MainWindow(QMainWindow):
             self.save_settings
         )
 
-        layout.addWidget(self.make_section_title("УПРАВЛЕНИЕ"))
+        home_layout.addWidget(self.make_section_title("УПРАВЛЕНИЕ"))
 
         self.status_label = QLabel()
         self.status_label.setObjectName("statusLabel")
-        layout.addWidget(self.status_label)
+        home_layout.addWidget(self.status_label)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
 
         self.start_button = QPushButton("▶  Старт")
         self.start_button.setObjectName("startButton")
+        self.start_button.setMinimumHeight(44)
         self.start_button.clicked.connect(self.start_clicking)
 
         self.stop_button = QPushButton("■  Стоп")
         self.stop_button.setObjectName("stopButton")
+        self.stop_button.setMinimumHeight(44)
         self.stop_button.clicked.connect(self.stop_clicking)
 
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.stop_button)
-        layout.addLayout(buttons)
+        home_layout.addLayout(buttons)
 
         stats = QHBoxLayout()
-
         self.counter_label = QLabel("Кликов: 0")
         self.last_click_label = QLabel("Последний клик: —")
 
         stats.addWidget(self.counter_label)
         stats.addStretch()
         stats.addWidget(self.last_click_label)
-        layout.addLayout(stats)
+        home_layout.addLayout(stats)
 
-        layout.addWidget(self.make_section_title("ЖУРНАЛ РАБОТЫ"))
+        home_layout.addStretch()
+
+        # --------------------------------------------------
+        # Профили
+        # --------------------------------------------------
+        profiles_page, profiles_layout = create_page(
+            "Профили",
+            "Сохраняй разные наборы параметров для своих задач.",
+        )
+
+        profiles_layout.addWidget(
+            self.make_section_title("АКТИВНЫЙ ПРОФИЛЬ")
+        )
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumHeight(40)
+        self.profile_combo.currentTextChanged.connect(
+            self.on_profile_changed
+        )
+        profiles_layout.addWidget(self.profile_combo)
+
+        profile_buttons = QHBoxLayout()
+
+        self.create_profile_button = QPushButton("Создать")
+        self.create_profile_button.clicked.connect(self.create_profile)
+
+        self.rename_profile_button = QPushButton("Переименовать")
+        self.rename_profile_button.clicked.connect(self.rename_profile)
+
+        self.delete_profile_button = QPushButton("Удалить")
+        self.delete_profile_button.clicked.connect(self.remove_profile)
+
+        profile_buttons.addWidget(self.create_profile_button)
+        profile_buttons.addWidget(self.rename_profile_button)
+        profile_buttons.addWidget(self.delete_profile_button)
+
+        profiles_layout.addLayout(profile_buttons)
+        profiles_layout.addStretch()
+
+        # --------------------------------------------------
+        # Журнал
+        # --------------------------------------------------
+        log_page, log_layout = create_page(
+            "Журнал",
+            "История событий и действий ClickPilot.",
+        )
+
+        log_layout.addWidget(self.make_section_title("СОБЫТИЯ"))
 
         self.log_view = QPlainTextEdit()
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(200)
-        self.log_view.setPlaceholderText("События появятся здесь...")
-        self.log_view.setMinimumHeight(140)
-        self.log_view.setMaximumHeight(190)
-        layout.addWidget(self.log_view)
+        self.log_view.setPlaceholderText(
+            "События появятся здесь..."
+        )
+        log_layout.addWidget(self.log_view, 1)
 
         log_buttons = QHBoxLayout()
 
@@ -284,96 +339,66 @@ class MainWindow(QMainWindow):
 
         log_buttons.addWidget(self.export_log_button)
         log_buttons.addWidget(self.clear_log_button)
-        layout.addLayout(log_buttons)
+        log_layout.addLayout(log_buttons)
+
+        # --------------------------------------------------
+        # Настройки
+        # --------------------------------------------------
+        settings_page, settings_layout = create_page(
+            "Настройки",
+            "Настрой горячие клавиши для управления приложением.",
+        )
+
+        settings_layout.addWidget(
+            self.make_section_title("ГОРЯЧИЕ КЛАВИШИ")
+        )
+
+        point_hotkey_row = QHBoxLayout()
+        point_hotkey_row.addWidget(QLabel("Выбор точки"))
+        point_hotkey_row.addStretch()
+
+        self.point_hotkey_button = QPushButton()
+        self.point_hotkey_button.setMinimumWidth(110)
+        self.point_hotkey_button.clicked.connect(
+            lambda: self.begin_hotkey_capture("point_hotkey")
+        )
+        point_hotkey_row.addWidget(self.point_hotkey_button)
+        settings_layout.addLayout(point_hotkey_row)
+
+        toggle_hotkey_row = QHBoxLayout()
+        toggle_hotkey_row.addWidget(QLabel("Старт / стоп"))
+        toggle_hotkey_row.addStretch()
+
+        self.toggle_hotkey_button = QPushButton()
+        self.toggle_hotkey_button.setMinimumWidth(110)
+        self.toggle_hotkey_button.clicked.connect(
+            lambda: self.begin_hotkey_capture("toggle_hotkey")
+        )
+        toggle_hotkey_row.addWidget(self.toggle_hotkey_button)
+        settings_layout.addLayout(toggle_hotkey_row)
 
         hint = QLabel(
-            "Горячие клавиши можно изменить в настройках выше.\n"
-            "Для выбора точки сначала нажми кнопку «Выбрать точку»."
+            "Для изменения горячей клавиши нажми на кнопку "
+            "справа и затем нажми нужную клавишу.\n\n"
+            "Перед изменением горячих клавиш останови автокликер."
         )
         hint.setObjectName("hint")
         hint.setWordWrap(True)
-        layout.addWidget(hint)
+        settings_layout.addWidget(hint)
+        settings_layout.addStretch()
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll_area.setWidget(root)
+        # Навигация
+        self.nav_group.idClicked.connect(
+            self.page_stack.setCurrentIndex
+        )
+        self.nav_group.button(0).setChecked(True)
+        self.page_stack.setCurrentIndex(0)
 
-        self.setCentralWidget(scroll_area)
+        self.setCentralWidget(root)
+        self.setMinimumSize(760, 620)
+        self.resize(1000, 720)
 
-        self.setMinimumSize(680, 700)
-        self.resize(760, 900)
-
-        self.setStyleSheet("""
-            QMainWindow, QWidget {
-                background-color: #15171c;
-                color: #e8eaf0;
-                font-size: 13px;
-            }
-            QLabel#title {
-                font-size: 28px;
-                font-weight: 700;
-                color: #ffffff;
-            }
-            QLabel#subtitle, QLabel#hint {
-                color: #969cab;
-            }
-            QLabel#pointLabel, QLabel#statusLabel {
-                background-color: #20232b;
-                border: 1px solid #303440;
-                border-radius: 8px;
-                padding: 11px;
-            }
-            QLabel#sectionTitle {
-                color: #8f9cff;
-                font-size: 11px;
-                font-weight: 700;
-                padding-top: 5px;
-            }
-            QComboBox, QDoubleSpinBox {
-                background-color: #20232b;
-                border: 1px solid #363b49;
-                border-radius: 7px;
-                padding: 8px;
-                min-width: 110px;
-            }
-            QPushButton {
-                background-color: #292d37;
-                border: 1px solid #3a4050;
-                border-radius: 8px;
-                padding: 11px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #363c49;
-            }
-            QPushButton:disabled {
-                color: #6e7380;
-                background-color: #20232b;
-            }
-            QPushButton#startButton {
-                background-color: #5668e8;
-                border: none;
-                color: white;
-            }
-            QPushButton#startButton:hover {
-                background-color: #6879f4;
-            }
-            QPushButton#stopButton {
-                background-color: #342329;
-                color: #ff929c;
-                border: 1px solid #5b303b;
-            }
-            QPlainTextEdit#logView {
-                background-color: #101216;
-                border: 1px solid #303440;
-                border-radius: 8px;
-                padding: 8px;
-                color: #b9c1d2;
-                font-family: Consolas;
-                font-size: 12px;
-            }
-        """)
+        self.setStyleSheet(APP_STYLE)
 
     @staticmethod
     def key_to_name(key) -> str | None:
@@ -905,9 +930,7 @@ class MainWindow(QMainWindow):
     def setup_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
 
-        icon = QApplication.style().standardIcon(
-            QStyle.StandardPixmap.SP_ComputerIcon
-        )
+        icon = QIcon(resource_path("assets/clickpilot.ico"))
         self.setWindowIcon(icon)
         self.tray_icon.setIcon(icon)
         self.tray_icon.setToolTip("ClickPilot")
