@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QSystemTrayIcon,
     QInputDialog,
+    QScrollArea,
 )
 
 from .config import (
@@ -41,6 +42,8 @@ from .activity_log import ActivityLogger
 class MainWindow(QMainWindow):
     point_selected = Signal(int, int)
     toggle_requested = Signal()
+    hotkey_captured = Signal(str, str)
+
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,6 +55,9 @@ class MainWindow(QMainWindow):
         self.selecting_point = False
         self.last_key = None
         self.click_count = 0
+
+        self._capturing_hotkey: str | None = None
+        self.hotkey_captured.connect(self.on_hotkey_captured)
 
         self.clicker = Clicker()
         self.clicker.status_changed.connect(self.on_status_changed)
@@ -72,9 +78,6 @@ class MainWindow(QMainWindow):
         for entry in self.activity_logger.read_recent():
             self.log_view.appendPlainText(entry)
 
-        self.log_event("Приложение запущено")
-        self.log_event("Настройки загружены")
-
         self.keyboard_listener = keyboard.Listener(
             on_press=self.on_global_key_press,
             on_release=self.on_global_key_release,
@@ -86,7 +89,11 @@ class MainWindow(QMainWindow):
 
     def build_ui(self) -> None:
         root = QWidget()
+        root.setMinimumWidth(620)
+
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
@@ -164,8 +171,22 @@ class MainWindow(QMainWindow):
         self.interval_unit_input.addItem("Минуты", "min")
 
         interval_row = QHBoxLayout()
+        interval_row.setSpacing(10)
+
+        self.interval_input.setMinimumWidth(140)
+        self.interval_input.setSizePolicy(
+            self.interval_input.sizePolicy().Policy.Expanding,
+            self.interval_input.sizePolicy().Policy.Fixed,
+        )
+
+        self.interval_unit_input.setMinimumWidth(150)
+
         interval_row.addWidget(self.interval_input, 2)
         interval_row.addWidget(self.interval_unit_input, 1)
+
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
         form.addRow("Интервал между кликами", interval_row)
 
 
@@ -176,6 +197,31 @@ class MainWindow(QMainWindow):
         form.addRow("Тип действия", self.click_type_input)
 
         layout.addLayout(form)
+
+        layout.addWidget(self.make_section_title("ГОРЯЧИЕ КЛАВИШИ"))
+
+        point_hotkey_row = QHBoxLayout()
+        point_hotkey_row.addWidget(QLabel("Выбор точки"))
+        point_hotkey_row.addStretch()
+
+        self.point_hotkey_button = QPushButton()
+        self.point_hotkey_button.clicked.connect(
+            lambda: self.begin_hotkey_capture("point_hotkey")
+        )
+        point_hotkey_row.addWidget(self.point_hotkey_button)
+        layout.addLayout(point_hotkey_row)
+
+        toggle_hotkey_row = QHBoxLayout()
+        toggle_hotkey_row.addWidget(QLabel("Старт / стоп"))
+        toggle_hotkey_row.addStretch()
+
+        self.toggle_hotkey_button = QPushButton()
+        self.toggle_hotkey_button.clicked.connect(
+            lambda: self.begin_hotkey_capture("toggle_hotkey")
+        )
+        toggle_hotkey_row.addWidget(self.toggle_hotkey_button)
+        layout.addLayout(toggle_hotkey_row)
+
 
         self.interval_input.valueChanged.connect(self.save_settings)
         self.interval_unit_input.currentIndexChanged.connect(
@@ -223,7 +269,8 @@ class MainWindow(QMainWindow):
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(200)
         self.log_view.setPlaceholderText("События появятся здесь...")
-        self.log_view.setMinimumHeight(130)
+        self.log_view.setMinimumHeight(140)
+        self.log_view.setMaximumHeight(190)
         layout.addWidget(self.log_view)
 
         log_buttons = QHBoxLayout()
@@ -238,16 +285,24 @@ class MainWindow(QMainWindow):
         log_buttons.addWidget(self.clear_log_button)
         layout.addLayout(log_buttons)
 
-
         hint = QLabel(
-            "F5 — сохранить позицию курсора во время выбора точки.\n"
-            "F6 — запустить или остановить макрос."
+            "Горячие клавиши можно изменить в настройках выше.\n"
+            "Для выбора точки сначала нажми кнопку «Выбрать точку»."
         )
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self.setCentralWidget(root)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_area.setWidget(root)
+
+        self.setCentralWidget(scroll_area)
+
+        self.setMinimumSize(680, 700)
+        self.resize(760, 900)
+
         self.setStyleSheet("""
             QMainWindow, QWidget {
                 background-color: #15171c;
@@ -319,6 +374,102 @@ class MainWindow(QMainWindow):
             }
         """)
 
+    @staticmethod
+    def key_to_name(key) -> str | None:
+        """Преобразует нажатие pynput в понятное имя клавиши."""
+        if isinstance(key, keyboard.KeyCode):
+            if key.char and len(key.char) == 1:
+                char = key.char.upper()
+                if char.isalnum():
+                    return char
+            return None
+
+        special_keys = {
+            keyboard.Key.space: "SPACE",
+            keyboard.Key.tab: "TAB",
+            keyboard.Key.enter: "ENTER",
+            keyboard.Key.esc: "ESC",
+            keyboard.Key.backspace: "BACKSPACE",
+            keyboard.Key.delete: "DELETE",
+            keyboard.Key.insert: "INSERT",
+            keyboard.Key.home: "HOME",
+            keyboard.Key.end: "END",
+            keyboard.Key.page_up: "PAGE_UP",
+            keyboard.Key.page_down: "PAGE_DOWN",
+            keyboard.Key.up: "UP",
+            keyboard.Key.down: "DOWN",
+            keyboard.Key.left: "LEFT",
+            keyboard.Key.right: "RIGHT",
+        }
+
+        if key in special_keys:
+            return special_keys[key]
+
+        key_name = getattr(key, "name", None)
+        if key_name and key_name.startswith("f"):
+            number = key_name[1:]
+            if number.isdigit() and 1 <= int(number) <= 12:
+                return key_name.upper()
+
+        return None
+
+    def begin_hotkey_capture(self, setting_name: str) -> None:
+        if self.clicker.is_running:
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Останови автокликер перед изменением горячих клавиш.",
+            )
+            return
+
+        self._capturing_hotkey = setting_name
+
+        if setting_name == "point_hotkey":
+            self.point_hotkey_button.setText("Нажми клавишу…")
+        else:
+            self.toggle_hotkey_button.setText("Нажми клавишу…")
+
+        self.log_event("Ожидание новой горячей клавиши")
+
+    @Slot(str, str)
+    def on_hotkey_captured(
+        self,
+        setting_name: str,
+        key_name: str,
+    ) -> None:
+        self._capturing_hotkey = None
+
+        other_setting = (
+            "toggle_hotkey"
+            if setting_name == "point_hotkey"
+            else "point_hotkey"
+        )
+
+        if key_name == self.config.get(other_setting, "F6" if other_setting == "toggle_hotkey" else "F5"):
+            QMessageBox.warning(
+                self,
+                "Конфликт горячих клавиш",
+                "Эта клавиша уже назначена на другое действие.",
+            )
+            self.refresh_hotkey_buttons()
+            return
+
+        self.config[setting_name] = key_name
+        self.save_settings()
+        self.refresh_hotkey_buttons()
+        self.log_event(f"Горячая клавиша изменена: {key_name}")
+
+    def refresh_hotkey_buttons(self) -> None:
+        point_key = self.config.get("point_hotkey", "F5")
+        toggle_key = self.config.get("toggle_hotkey", "F6")
+
+        self.point_hotkey_button.setText(point_key)
+        self.toggle_hotkey_button.setText(toggle_key)
+        self.select_button.setText(
+            f"Выбрать точку  ·  {point_key}"
+        )
+
+
     def make_section_title(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setObjectName("sectionTitle")
@@ -354,6 +505,7 @@ class MainWindow(QMainWindow):
             self.point_label.setText("Точка не выбрана")
 
         self.interval_input.blockSignals(True)
+        self.interval_unit_input.blockSignals(True)
         self.click_type_input.blockSignals(True)
 
         try:
@@ -367,6 +519,12 @@ class MainWindow(QMainWindow):
         index = self.click_type_input.findData(click_type)
         self.click_type_input.setCurrentIndex(index if index >= 0 else 0)
 
+        point_hotkey = self.config.get("point_hotkey", "F5")
+        toggle_hotkey = self.config.get("toggle_hotkey", "F6")
+
+        self.config["point_hotkey"] = point_hotkey
+        self.config["toggle_hotkey"] = toggle_hotkey
+
         self.interval_input.blockSignals(False)
         interval_unit = self.config.get("interval_unit", "s")
         unit_index = self.interval_unit_input.findData(interval_unit)
@@ -377,11 +535,22 @@ class MainWindow(QMainWindow):
         self.interval_unit_input.blockSignals(False)
         self.click_type_input.blockSignals(False)
 
+        self.refresh_hotkey_buttons()
+
         self.apply_clicker_config()
 
     def save_settings(self, *_args) -> None:
         self.config["interval"] = self.interval_input.value()
+        self.config["interval_unit"] = (
+            self.interval_unit_input.currentData()
+        )
         self.config["click_type"] = self.click_type_input.currentData()
+        self.config["point_hotkey"] = self.config.get(
+            "point_hotkey", "F5"
+        )
+        self.config["toggle_hotkey"] = self.config.get(
+            "toggle_hotkey", "F6"
+        )
 
         profile_name = self.config.get(
             "active_profile", "По умолчанию"
@@ -392,12 +561,9 @@ class MainWindow(QMainWindow):
         self.delete_profile_button.setEnabled(
             len(self.config.get("profiles", {})) > 1
         )
-
-        self.config["interval"] = self.interval_input.value()
-        self.config["interval_unit"] = self.interval_unit_input.currentData()
-        self.config["click_type"] = self.click_type_input.currentData()
-
         self.apply_clicker_config()
+        self.refresh_hotkey_buttons()
+
 
 
     @Slot(str)
@@ -575,12 +741,22 @@ class MainWindow(QMainWindow):
             return
 
         self.last_key = key
+        key_name = self.key_to_name(key)
 
-        if key == keyboard.Key.f5 and self.selecting_point:
-            x, y = pyautogui.position()
-            self.point_selected.emit(x, y)
-        elif key == keyboard.Key.f6:
+        if self._capturing_hotkey is not None:
+            if key_name is not None:
+                setting_name = self._capturing_hotkey
+                self.hotkey_captured.emit(setting_name, key_name)
+            return
+
+        if key_name == self.config.get("point_hotkey", "F5"):
+            if self.selecting_point:
+                x, y = pyautogui.position()
+                self.point_selected.emit(x, y)
+
+        elif key_name == self.config.get("toggle_hotkey", "F6"):
             self.toggle_requested.emit()
+
 
     def on_global_key_release(self, key) -> None:
         if key == self.last_key:
