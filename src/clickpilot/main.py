@@ -6,6 +6,7 @@ import pyautogui
 from pynput import keyboard
 
 from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -20,6 +21,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QFileDialog,
+    QMenu,
+    QStyle,
+    QSystemTrayIcon,
 )
 
 from .config import load_config, save_config
@@ -53,6 +57,8 @@ class MainWindow(QMainWindow):
         self.activity_logger = ActivityLogger()
 
         self.build_ui()
+        self._allow_exit = False
+        self.setup_tray()
         self.load_settings_into_ui()
         self.update_status(self.clicker.is_running)
 
@@ -371,6 +377,7 @@ class MainWindow(QMainWindow):
     @Slot(bool)
     def on_status_changed(self, running: bool) -> None:
         self.update_status(running)
+        self.update_tray_actions(running)
 
     def update_status(self, running: bool) -> None:
         if running:
@@ -410,8 +417,15 @@ class MainWindow(QMainWindow):
         self.update_status(self.clicker.is_running)
 
     def closeEvent(self, event) -> None:
+        if not self._allow_exit and self.tray_icon.isVisible():
+            event.ignore()
+            self.hide()
+            self.log_event("Окно скрыто в системный трей")
+            return
+
         self.clicker.stop()
         self.keyboard_listener.stop()
+        self.tray_icon.hide()
         self.log_event("Приложение закрывается")
         event.accept()
 
@@ -458,6 +472,73 @@ class MainWindow(QMainWindow):
             self.log_event("Журнал очищен")
         except OSError as exc:
             self.show_error(f"Не удалось очистить журнал: {exc}")
+
+
+    def setup_tray(self) -> None:
+        self.tray_icon = QSystemTrayIcon(self)
+
+        icon = QApplication.style().standardIcon(
+            QStyle.StandardPixmap.SP_ComputerIcon
+        )
+        self.setWindowIcon(icon)
+        self.tray_icon.setIcon(icon)
+        self.tray_icon.setToolTip("ClickPilot")
+
+        menu = QMenu(self)
+
+        self.show_action = QAction("Открыть ClickPilot", self)
+        self.show_action.triggered.connect(self.show_window)
+        menu.addAction(self.show_action)
+
+        menu.addSeparator()
+
+        self.tray_start_action = QAction("Запустить", self)
+        self.tray_start_action.triggered.connect(self.start_clicking)
+        menu.addAction(self.tray_start_action)
+
+        self.tray_stop_action = QAction("Остановить", self)
+        self.tray_stop_action.triggered.connect(self.stop_clicking)
+        menu.addAction(self.tray_stop_action)
+
+        menu.addSeparator()
+
+        self.quit_action = QAction("Выход", self)
+        self.quit_action.triggered.connect(self.quit_application)
+        menu.addAction(self.quit_action)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
+        self.tray_icon.show()
+
+        self.update_tray_actions(self.clicker.is_running)
+
+    @Slot()
+    def show_window(self) -> None:
+        self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @Slot()
+    def quit_application(self) -> None:
+        self._allow_exit = True
+        self.tray_icon.hide()
+        self.clicker.stop()
+        self.keyboard_listener.stop()
+        QApplication.instance().quit()
+
+    @Slot(QSystemTrayIcon.ActivationReason)
+    def on_tray_activated(
+        self,
+        reason: QSystemTrayIcon.ActivationReason,
+    ) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_window()
+
+    def update_tray_actions(self, running: bool) -> None:
+        self.tray_start_action.setEnabled(not running)
+        self.tray_stop_action.setEnabled(running)
+
 
 
 
