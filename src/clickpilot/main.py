@@ -24,9 +24,16 @@ from PySide6.QtWidgets import (
     QMenu,
     QStyle,
     QSystemTrayIcon,
+    QInputDialog,
 )
 
-from .config import load_config, save_config
+from .config import (
+    load_config,
+    save_config,
+    save_profile,
+    activate_profile,
+    delete_profile,
+)
 from .clicker import Clicker
 from .activity_log import ActivityLogger
 
@@ -86,6 +93,38 @@ class MainWindow(QMainWindow):
         title = QLabel("ClickPilot")
         title.setObjectName("title")
         layout.addWidget(title)
+
+        layout.addWidget(self.make_section_title("ПРОФИЛЬ НАСТРОЕК"))
+
+        profile_row = QHBoxLayout()
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(160)
+        self.profile_combo.currentTextChanged.connect(
+            self.on_profile_changed
+        )
+        profile_row.addWidget(self.profile_combo, 1)
+
+        self.create_profile_button = QPushButton("Создать")
+        self.create_profile_button.clicked.connect(
+            self.create_profile
+        )
+        profile_row.addWidget(self.create_profile_button)
+
+        self.rename_profile_button = QPushButton("Переименовать")
+        self.rename_profile_button.clicked.connect(
+            self.rename_profile
+        )
+        profile_row.addWidget(self.rename_profile_button)
+
+        self.delete_profile_button = QPushButton("Удалить")
+        self.delete_profile_button.clicked.connect(
+            self.remove_profile
+        )
+        profile_row.addWidget(self.delete_profile_button)
+
+        layout.addLayout(profile_row)
+
 
         subtitle = QLabel(
             "Автоматические клики мышью с сохранением настроек"
@@ -271,7 +310,22 @@ class MainWindow(QMainWindow):
         label.setObjectName("sectionTitle")
         return label
 
+
     def load_settings_into_ui(self) -> None:
+        profiles = self.config.get("profiles", {})
+        active = self.config.get("active_profile", "По умолчанию")
+
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        self.profile_combo.addItems(list(profiles.keys()))
+
+        index = self.profile_combo.findText(active)
+        if index >= 0:
+            self.profile_combo.setCurrentIndex(index)
+        self.profile_combo.blockSignals(False)
+
+        self.delete_profile_button.setEnabled(len(profiles) > 1)
+
         x = self.config.get("x")
         y = self.config.get("y")
 
@@ -282,10 +336,16 @@ class MainWindow(QMainWindow):
             and not isinstance(y, bool)
         ):
             self.point_label.setText(f"X = {x}    ·    Y = {y}")
+        else:
+            self.point_label.setText("Точка не выбрана")
 
-        interval = self.config.get("interval", 5.0)
+        self.interval_input.blockSignals(True)
+        self.click_type_input.blockSignals(True)
+
         try:
-            self.interval_input.setValue(float(interval))
+            self.interval_input.setValue(
+                float(self.config.get("interval", 5.0))
+            )
         except (TypeError, ValueError):
             self.interval_input.setValue(5.0)
 
@@ -293,14 +353,174 @@ class MainWindow(QMainWindow):
         index = self.click_type_input.findData(click_type)
         self.click_type_input.setCurrentIndex(index if index >= 0 else 0)
 
+        self.interval_input.blockSignals(False)
+        self.click_type_input.blockSignals(False)
+
         self.apply_clicker_config()
 
     def save_settings(self, *_args) -> None:
         self.config["interval"] = self.interval_input.value()
         self.config["click_type"] = self.click_type_input.currentData()
 
+        profile_name = self.config.get(
+            "active_profile", "По умолчанию"
+        )
+        self.config = save_profile(self.config, profile_name)
+
         save_config(self.config)
+        self.delete_profile_button.setEnabled(
+            len(self.config.get("profiles", {})) > 1
+        )
         self.apply_clicker_config()
+
+
+    @Slot(str)
+    def on_profile_changed(self, profile_name: str) -> None:
+        if not profile_name:
+            return
+
+        if profile_name == self.config.get("active_profile"):
+            return
+
+        if self.clicker.is_running:
+            self.profile_combo.blockSignals(True)
+            self.profile_combo.setCurrentText(
+                self.config["active_profile"]
+            )
+            self.profile_combo.blockSignals(False)
+
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Останови автокликер перед переключением профиля.",
+            )
+            return
+
+        try:
+            self.config = activate_profile(self.config, profile_name)
+            save_config(self.config)
+            self.load_settings_into_ui()
+            self.log_event(f"Активирован профиль: {profile_name}")
+        except ValueError as exc:
+            QMessageBox.warning(self, "ClickPilot", str(exc))
+            self.load_settings_into_ui()
+
+    @Slot()
+    def create_profile(self) -> None:
+        name, accepted = QInputDialog.getText(
+            self,
+            "Новый профиль",
+            "Название профиля:",
+        )
+
+        if not accepted:
+            return
+
+        name = name.strip()
+        if not name:
+            QMessageBox.warning(
+                self, "ClickPilot", "Название не может быть пустым."
+            )
+            return
+
+        if name in self.config.get("profiles", {}):
+            QMessageBox.warning(
+                self, "ClickPilot", "Профиль с таким названием уже существует."
+            )
+            return
+
+        if self.clicker.is_running:
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Останови автокликер перед созданием профиля.",
+            )
+            return
+
+        self.config = save_profile(self.config, name)
+        save_config(self.config)
+        self.load_settings_into_ui()
+        self.log_event(f"Создан профиль: {name}")
+
+    @Slot()
+    def rename_profile(self) -> None:
+        old_name = self.config.get("active_profile", "По умолчанию")
+
+        if self.clicker.is_running:
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Останови автокликер перед переименованием профиля.",
+            )
+            return
+
+        new_name, accepted = QInputDialog.getText(
+            self,
+            "Переименовать профиль",
+            "Новое название:",
+            text=old_name,
+        )
+
+        if not accepted:
+            return
+
+        new_name = new_name.strip()
+        if not new_name:
+            QMessageBox.warning(
+                self, "ClickPilot", "Название не может быть пустым."
+            )
+            return
+
+        if new_name != old_name and new_name in self.config["profiles"]:
+            QMessageBox.warning(
+                self, "ClickPilot", "Профиль с таким названием уже существует."
+            )
+            return
+
+        if new_name == old_name:
+            return
+
+        self.config["profiles"][new_name] = (
+            self.config["profiles"].pop(old_name)
+        )
+        self.config["active_profile"] = new_name
+
+        save_config(self.config)
+        self.load_settings_into_ui()
+        self.log_event(f"Профиль переименован: {old_name} → {new_name}")
+
+    @Slot()
+    def remove_profile(self) -> None:
+        name = self.config.get("active_profile", "По умолчанию")
+
+        if self.clicker.is_running:
+            QMessageBox.information(
+                self,
+                "ClickPilot",
+                "Останови автокликер перед удалением профиля.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Удалить профиль",
+            f"Удалить профиль «{name}»?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self.config = delete_profile(self.config, name)
+            save_config(self.config)
+            self.load_settings_into_ui()
+            self.log_event(f"Удалён профиль: {name}")
+        except ValueError as exc:
+            QMessageBox.warning(self, "ClickPilot", str(exc))
+
 
     def apply_clicker_config(self) -> None:
         self.clicker.configure(
