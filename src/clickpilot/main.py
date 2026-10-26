@@ -37,6 +37,7 @@ from .config import (
 )
 from .clicker import Clicker
 from .activity_log import ActivityLogger
+from .hotkeys import hotkeys_conflict
 
 
 class MainWindow(QMainWindow):
@@ -445,7 +446,10 @@ class MainWindow(QMainWindow):
             else "point_hotkey"
         )
 
-        if key_name == self.config.get(other_setting, "F6" if other_setting == "toggle_hotkey" else "F5"):
+        point_hotkey = self.config.get("point_hotkey", "F5")
+        toggle_hotkey = self.config.get("toggle_hotkey", "F6")
+
+        if hotkeys_conflict(point_hotkey, toggle_hotkey):
             QMessageBox.warning(
                 self,
                 "Конфликт горячих клавиш",
