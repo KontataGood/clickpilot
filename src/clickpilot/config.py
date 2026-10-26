@@ -15,6 +15,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "interval": 5.0,
     "click_type": "left",
     "hotkey": "F6",
+    "interval_unit": "s",
 }
 
 DEFAULT_PROFILES: dict[str, dict[str, Any]] = {

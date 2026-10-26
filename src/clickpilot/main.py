@@ -151,12 +151,23 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         form.setSpacing(12)
 
+
         self.interval_input = QDoubleSpinBox()
-        self.interval_input.setRange(0.1, 3600)
-        self.interval_input.setSingleStep(0.5)
-        self.interval_input.setDecimals(1)
-        self.interval_input.setSuffix(" сек.")
-        form.addRow("Интервал между кликами", self.interval_input)
+        self.interval_input.setRange(1, 86_400_000)
+        self.interval_input.setSingleStep(100)
+        self.interval_input.setDecimals(3)
+        self.interval_input.setValue(5.0)
+
+        self.interval_unit_input = QComboBox()
+        self.interval_unit_input.addItem("Миллисекунды", "ms")
+        self.interval_unit_input.addItem("Секунды", "s")
+        self.interval_unit_input.addItem("Минуты", "min")
+
+        interval_row = QHBoxLayout()
+        interval_row.addWidget(self.interval_input, 2)
+        interval_row.addWidget(self.interval_unit_input, 1)
+        form.addRow("Интервал между кликами", interval_row)
+
 
         self.click_type_input = QComboBox()
         self.click_type_input.addItem("Левый клик", "left")
@@ -167,6 +178,9 @@ class MainWindow(QMainWindow):
         layout.addLayout(form)
 
         self.interval_input.valueChanged.connect(self.save_settings)
+        self.interval_unit_input.currentIndexChanged.connect(
+            self.save_settings
+        )
         self.click_type_input.currentIndexChanged.connect(
             self.save_settings
         )
@@ -354,6 +368,13 @@ class MainWindow(QMainWindow):
         self.click_type_input.setCurrentIndex(index if index >= 0 else 0)
 
         self.interval_input.blockSignals(False)
+        interval_unit = self.config.get("interval_unit", "s")
+        unit_index = self.interval_unit_input.findData(interval_unit)
+        self.interval_unit_input.setCurrentIndex(
+            unit_index if unit_index >= 0 else 1
+        )
+
+        self.interval_unit_input.blockSignals(False)
         self.click_type_input.blockSignals(False)
 
         self.apply_clicker_config()
@@ -371,6 +392,11 @@ class MainWindow(QMainWindow):
         self.delete_profile_button.setEnabled(
             len(self.config.get("profiles", {})) > 1
         )
+
+        self.config["interval"] = self.interval_input.value()
+        self.config["interval_unit"] = self.interval_unit_input.currentData()
+        self.config["click_type"] = self.click_type_input.currentData()
+
         self.apply_clicker_config()
 
 
@@ -528,7 +554,9 @@ class MainWindow(QMainWindow):
             y=self.config.get("y"),
             interval=float(self.config.get("interval", 5.0)),
             click_type=self.config.get("click_type", "left"),
+            unit=self.config.get("interval_unit", "s"),
         )
+
 
     @Slot()
     def begin_point_selection(self) -> None:

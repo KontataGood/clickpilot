@@ -11,8 +11,12 @@ class Clicker(QObject):
     click_performed = Signal()
     error_occurred = Signal(str)
 
+    MIN_INTERVAL_MS = 1
+    MAX_INTERVAL_MS = 86_400_000  # 24 часа
+
     def __init__(self) -> None:
         super().__init__()
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._click)
 
@@ -29,19 +33,61 @@ class Clicker(QObject):
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def interval_ms(self) -> int:
+        return self._interval_ms
+
+    @staticmethod
+    def to_milliseconds(value: float, unit: str) -> int:
+        """Преобразует интервал в миллисекунды."""
+        multipliers = {
+            "ms": 1,
+            "s": 1000,
+            "min": 60_000,
+        }
+
+        if unit not in multipliers:
+            raise ValueError(
+                "Единица интервала должна быть ms, s или min."
+            )
+
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Интервал должен быть числом.") from exc
+
+        if not 0 < numeric_value < float("inf"):
+            raise ValueError("Интервал должен быть положительным числом.")
+
+        interval_ms = round(numeric_value * multipliers[unit])
+
+        if not (
+            Clicker.MIN_INTERVAL_MS
+            <= interval_ms
+            <= Clicker.MAX_INTERVAL_MS
+        ):
+            raise ValueError(
+                "Интервал должен быть от 1 мс до 24 часов."
+            )
+
+        return interval_ms
+
     def configure(
         self,
         x: int | None,
         y: int | None,
         interval: float,
         click_type: str,
+        unit: str = "s",
     ) -> None:
         if self._running:
             self.stop()
 
+        interval_ms = self.to_milliseconds(interval, unit)
+
         self._x = x
         self._y = y
-        self._interval_ms = max(100, int(interval * 1000))
+        self._interval_ms = interval_ms
         self._click_type = click_type
 
         self._timer.setInterval(self._interval_ms)
@@ -87,6 +133,4 @@ class Clicker(QObject):
 
         except Exception as exc:
             self.stop()
-            self.error_occurred.emit(
-                f"Клики остановлены: {exc}"
-            )
+            self.error_occurred.emit(f"Клики остановлены: {exc}")
