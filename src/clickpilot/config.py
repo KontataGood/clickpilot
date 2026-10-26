@@ -16,7 +16,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "click_type": "left",
     "hotkey": "F6",
     "interval_unit": "s",
+    "point_hotkey": "F5",
+    "toggle_hotkey": "F6",
 }
+
 
 DEFAULT_PROFILES: dict[str, dict[str, Any]] = {
     DEFAULT_PROFILE_NAME: deepcopy(DEFAULT_CONFIG),
