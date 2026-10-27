@@ -34,6 +34,7 @@ def load_config() -> dict[str, Any]:
         return {
             **deepcopy(DEFAULT_CONFIG),
             "profiles": deepcopy(DEFAULT_PROFILES),
+            "autostart": False,
             "active_profile": DEFAULT_PROFILE_NAME,
         }
 
@@ -86,6 +87,7 @@ def load_config() -> dict[str, Any]:
 
         active_settings = valid_profiles[active_profile]
         config.update(active_settings)
+        config["autostart"] = bool(saved.get("autostart", False))
         config["profiles"] = valid_profiles
         config["active_profile"] = active_profile
 
@@ -96,6 +98,7 @@ def load_config() -> dict[str, Any]:
             **deepcopy(DEFAULT_CONFIG),
             "profiles": deepcopy(DEFAULT_PROFILES),
             "active_profile": DEFAULT_PROFILE_NAME,
+            "autostart": False,
         }
 
 
