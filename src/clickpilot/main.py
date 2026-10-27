@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QStackedWidget,
+    QCheckBox,
 )
 
 from .config import (
@@ -364,6 +365,20 @@ class MainWindow(QMainWindow):
         )
         point_hotkey_row.addWidget(self.point_hotkey_button)
         settings_layout.addLayout(point_hotkey_row)
+        settings_layout.addWidget(
+            self.make_section_title("ЗАПУСК ПРИ ВХОДЕ В WINDOWS")
+        )
+
+        self.autostart_checkbox = QCheckBox(
+            "Запускать вместе с Windows"
+        )
+        self.autostart_checkbox.setToolTip(
+            "Автоматически запускать ClickPilot при входе в систему"
+        )
+        self.autostart_checkbox.toggled.connect(
+            self.set_autostart
+        )
+        settings_layout.addWidget(self.autostart_checkbox)
 
         toggle_hotkey_row = QHBoxLayout()
         toggle_hotkey_row.addWidget(QLabel("Старт / стоп"))
@@ -566,7 +581,85 @@ class MainWindow(QMainWindow):
 
         self.refresh_hotkey_buttons()
 
+        self.autostart_checkbox.blockSignals(True)
+        self.autostart_checkbox.setChecked(
+            bool(self.config.get("autostart", False))
+        )
+        self.autostart_checkbox.blockSignals(False)
+
         self.apply_clicker_config()
+
+
+    def set_autostart(self, enabled: bool) -> None:
+        """Включает или отключает автозапуск ClickPilot в Windows."""
+        if sys.platform != "win32":
+            QMessageBox.warning(
+                self,
+                "Автозапуск",
+                "Автозапуск через реестр доступен только в Windows.",
+            )
+            self.autostart_checkbox.blockSignals(True)
+            self.autostart_checkbox.setChecked(False)
+            self.autostart_checkbox.blockSignals(False)
+            return
+
+        import winreg
+
+        registry_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "ClickPilot"
+
+        try:
+            # Для собранного приложения запускаем EXE.
+            if getattr(sys, "frozen", False):
+                command = f'"{sys.executable}"'
+            else:
+                # Для запуска из исходников используем точку входа проекта.
+                project_root = Path(__file__).resolve().parents[2]
+                entry_point = project_root / "run_clickpilot.py"
+                command = f'"{sys.executable}" "{entry_point}"'
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                registry_path,
+                0,
+                winreg.KEY_SET_VALUE,
+            ) as key:
+                if enabled:
+                    winreg.SetValueEx(
+                        key,
+                        app_name,
+                        0,
+                        winreg.REG_SZ,
+                        command,
+                    )
+                else:
+                    try:
+                        winreg.DeleteValue(key, app_name)
+                    except FileNotFoundError:
+                        pass
+
+            self.config["autostart"] = enabled
+            save_config(self.config)
+
+            self.log_event(
+                "Автозапуск включён"
+                if enabled
+                else "Автозапуск отключён"
+            )
+
+        except OSError as error:
+            QMessageBox.warning(
+                self,
+                "Ошибка автозапуска",
+                f"Не удалось изменить настройку автозапуска:\n{error}",
+            )
+
+            self.autostart_checkbox.blockSignals(True)
+            self.autostart_checkbox.setChecked(
+                bool(self.config.get("autostart", False))
+            )
+            self.autostart_checkbox.blockSignals(False)
+
 
     def save_settings(self, *_args) -> None:
         self.config["interval"] = self.interval_input.value()
