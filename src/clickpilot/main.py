@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()
 
-        version_label = QLabel("ClickPilot · v0.2.0")
+        version_label = QLabel("ClickPilot · v1.0.0")
         version_label.setObjectName("hint")
         sidebar_layout.addWidget(version_label)
 
